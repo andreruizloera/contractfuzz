@@ -1,0 +1,49 @@
+[project]
+name = "contractfuzz"
+version = "0.1.0"
+description = "Find undocumented assumptions in API clients."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Andre Ruiz Loera", email = "andre.x.ruizloera@gmail.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "jsonschema>=4.21",
+    "pyyaml>=6.0",
+]
+keywords = ["openapi", "fuzzing", "api-testing", "property-testing", "fixtures"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.urls]
+Repository = "https://github.com/andreruizloera/contractfuzz"
+
+[project.scripts]
+contractfuzz = "contractfuzz.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "hypothesis>=6.100",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

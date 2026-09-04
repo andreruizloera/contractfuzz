@@ -1,0 +1,132 @@
+openapi: 3.0.3
+info:
+  title: Example User API
+  version: 1.0.0
+  description: >
+    A small but realistic contract used by the contractfuzz demo. The User
+    schema deliberately leaves room for edge cases that are valid under the
+    contract: optional fields, a nullable field, arrays with no minItems,
+    strings with no minLength, and integer boundaries.
+paths:
+  /users:
+    get:
+      summary: List users
+      responses:
+        "200":
+          description: All users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+  /users/{id}:
+    get:
+      summary: Fetch one user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: The user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    patch:
+      summary: Update one user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserUpdate"
+      responses:
+        "200":
+          description: The updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+components:
+  schemas:
+    User:
+      type: object
+      required: [id, displayName, email, status, roles]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        displayName:
+          type: string
+          maxLength: 64
+        email:
+          type: string
+          format: email
+        age:
+          type: integer
+          minimum: 0
+          maximum: 150
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+        roles:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            enum: [admin, editor, viewer, billing, support]
+        profileImage:
+          type: string
+          format: uri
+          nullable: true
+        address:
+          type: object
+          required: [city]
+          properties:
+            street:
+              type: string
+            city:
+              type: string
+              minLength: 1
+            postalCode:
+              type: string
+    UserUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        displayName:
+          type: string
+          maxLength: 64
+        age:
+          type: integer
+          minimum: 0
+          maximum: 150
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
