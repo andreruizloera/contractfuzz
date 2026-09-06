@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from contractfuzz.generator import generate_for_target, generate_variants
@@ -105,6 +105,12 @@ _property_schemas = st.fixed_dictionaries(
 )
 
 
+# No deadline: a single case builds a baseline, walks it for mutations, and
+# runs jsonschema over every one of them, so its runtime scales with how many
+# properties the strategy happened to pick and varies with machine load. This
+# test asserts that the variants are valid, not that generating them is fast,
+# and a timing-based failure here would be a false alarm in CI.
+@settings(deadline=None)
 @given(
     properties=_property_schemas,
     required_mask=st.lists(st.booleans(), min_size=5, max_size=5),

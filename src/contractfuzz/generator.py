@@ -69,7 +69,12 @@ def generate_for_target(target: Target) -> TargetResult:
     return TargetResult(target, baseline, variants, rejected)
 
 
-def _slug(text: str, limit: int = 48) -> str:
+def slugify(text: str, limit: int = 48) -> str:
+    """Turn a mutation description into a filename-safe, id-safe token.
+
+    Shared by fixture filenames and the pytest plugin's test ids, so the
+    same mutation is named the same way wherever it shows up.
+    """
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", text).strip("_").lower()
     return slug[:limit] or "variant"
 
@@ -100,7 +105,7 @@ def write_fixtures(
             "variants": [],
         }
         for i, variant in enumerate(result.variants, start=1):
-            name = f"{label}__{i:03d}__{_slug(variant.mutation.description)}.json"
+            name = f"{label}__{i:03d}__{slugify(variant.mutation.description)}.json"
             (out_dir / name).write_text(json.dumps(variant.data, indent=2) + "\n", encoding="utf-8")
             entry["variants"].append({"file": name, "mutation": variant.mutation.record()})
         manifest["targets"].append(entry)

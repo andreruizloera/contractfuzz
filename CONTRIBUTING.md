@@ -25,10 +25,21 @@ uv run pytest
    candidate, the validator will discard it, but prefer not proposing it
    at all; `rejected == 0` for the example spec is asserted in the tests.
 
+The pytest plugin's tests live in `tests/test_plugin.py` and run through
+`pytester`, which runs pytest inside pytest. They deliberately do not pass
+`-p contractfuzz.plugin` to the inner run: the plugin has to load from its
+`pytest11` entry point, the way it does for a user who just installs it.
+If you change the plugin, run `./demo.sh`, whose step 3 must still fail
+(the example client is fragile on purpose).
+
 ## Design notes
 
 - Keep the pipeline one-directional: baseline, mutations, validation,
   output. Do not add side channels around the validator.
 - Expected failures raise `ContractfuzzError` subclasses with messages a
-  person can act on; the CLI turns them into clean nonzero exits.
-- No new runtime dependencies without prior discussion in an issue.
+  person can act on; the CLI turns them into clean nonzero exits, and the
+  plugin turns them into one-line test failures rather than collection
+  tracebacks.
+- No new runtime dependencies without prior discussion in an issue. pytest
+  is an optional extra (`contractfuzz[pytest]`) and nothing outside
+  `plugin.py` may import it.

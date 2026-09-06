@@ -20,11 +20,18 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 
+[project.optional-dependencies]
+# The pytest plugin is the only part that needs pytest at runtime.
+pytest = ["pytest>=8.0"]
+
 [project.urls]
 Repository = "https://github.com/andreruizloera/contractfuzz"
 
 [project.scripts]
 contractfuzz = "contractfuzz.cli:main"
+
+[project.entry-points.pytest11]
+contractfuzz = "contractfuzz.plugin"
 
 [build-system]
 requires = ["hatchling"]
@@ -46,4 +53,6 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# `pytester` runs pytest inside pytest, which is how tests/test_plugin.py
+# exercises the plugin the way a real user's suite would load it.
+addopts = "-q -p pytester"

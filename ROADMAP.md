@@ -27,8 +27,13 @@ Honest future work. None of this is implemented yet.
 
 ## Integrations
 
-- A pytest plugin: `@contractfuzz.fixtures("openapi.yaml", "/users/{id}")`
-  parametrizes a test with every generated variant.
+The pytest plugin (`contract_variants`) SHIPPED; see the README. What is
+still future work around it:
+
+- Reuse a pinned fixture directory instead of generating in-process, for
+  suites that want byte-identical payloads across runs.
+- A `--contractfuzz-danger` command-line option so a whole run can be
+  narrowed to the most dangerous mutations without editing decorators.
 - Response mocking helpers for `respx` and `responses` so HTTP clients can
   be tested without a live server.
 - JS/TS fixture output with type stubs for frontend test suites.
