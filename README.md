@@ -13,7 +13,8 @@ the payloads the server is *allowed* to send but never does in testing:
 optional fields missing, nullables null, arrays empty, strings empty,
 integers at their boundaries. Feed those to your client and find out what
 it silently assumed. Run it once from the command line, or wire it into
-your suite with the pytest plugin and get one test case per assumption.
+your suite with the pytest plugin and get one test case per assumption,
+served to your real `requests` or `httpx` client with no server running.
 
 **Core principle: every generated payload remains valid according to the
 OpenAPI contract.** contractfuzz never produces malformed data. Each
@@ -28,7 +29,8 @@ bug is in the client, not in the data.
 git clone https://github.com/andreruizloera/contractfuzz
 cd contractfuzz
 uv sync
-./demo.sh        # generate fixtures, replay them, then run them as a pytest suite
+./demo.sh        # generate fixtures, replay them, run them as a pytest suite,
+                 # then serve them to real requests and httpx clients
 ```
 
 Or, one piece at a time:
@@ -36,6 +38,7 @@ Or, one piece at a time:
 ```
 uv run contractfuzz generate examples/openapi.yaml --endpoint '/users/{id}' --out fixtures
 uv run pytest examples/test_fragile_client.py    # expected to fail: that is the point
+uv run pytest examples/test_mocked_client.py     # the same, through requests and httpx
 ```
 
 ## Example
@@ -135,7 +138,69 @@ FAILED examples/test_fragile_client.py::test_render_profile_handles_every_contra
 Nineteen payloads the client handles, four it does not, one test case per
 mutation, and no fixture directory to keep in sync.
 
-`demo.sh` runs both of these end to end.
+Real clients fetch over HTTP before they parse anything, so the payload has
+to arrive through `requests` or `httpx`. `mock_contract_response` registers
+it as the response the contract declares, status code and content type
+included, with no server running:
+
+```python
+@contract_variants("openapi.yaml", "/users/{id}", method="get", status="200")
+def test_requests_client(payload: dict[str, Any], contractfuzz_case: Case) -> None:
+    with mock_contract_response(URL, payload, contractfuzz_case, backend="responses"):
+        fetch_profile_with_requests(BASE_URL, 7)
+```
+
+`examples/test_mocked_client.py` does that for both an httpx client and a
+requests client, and both break in the same four places:
+
+```
+$ pytest examples/test_mocked_client.py --tb=no -q
+...F...F.....FF...........F...F.....FF............                       [100%]
+================================= contractfuzz =================================
+50 contract-valid payloads exercised, 8 broke the client.
+
+Undocumented assumptions, most dangerous first:
+  [danger 3] GET 200 response: age omitted
+      KeyError: 'age'
+      at fragile_client.py:33  years_old = user["age"]  # assumes optional age is present
+  [danger 3] GET 200 response: roles = []
+      IndexError: list index out of range
+      at fragile_client.py:32  primary_role = user["roles"][0]  # assumes roles is never empty
+  [danger 3] GET 200 response: profileImage omitted
+      KeyError: 'profileImage'
+      at fragile_client.py:34  avatar = user["profileImage"].lower()  # assumes nullable field is a string
+  [danger 3] GET 200 response: profileImage = null
+      AttributeError: 'NoneType' object has no attribute 'lower'
+      at fragile_client.py:34  avatar = user["profileImage"].lower()  # assumes nullable field is a string
+  [danger 3] GET 200 response: age omitted
+      KeyError: 'age'
+      at fragile_client.py:33  years_old = user["age"]  # assumes optional age is present
+  [danger 3] GET 200 response: roles = []
+      IndexError: list index out of range
+      at fragile_client.py:32  primary_role = user["roles"][0]  # assumes roles is never empty
+  [danger 3] GET 200 response: profileImage omitted
+      KeyError: 'profileImage'
+      at fragile_client.py:34  avatar = user["profileImage"].lower()  # assumes nullable field is a string
+  [danger 3] GET 200 response: profileImage = null
+      AttributeError: 'NoneType' object has no attribute 'lower'
+      at fragile_client.py:34  avatar = user["profileImage"].lower()  # assumes nullable field is a string
+=========================== short test summary info ============================
+FAILED examples/test_mocked_client.py::test_requests_client_survives_every_contract_valid_response[age_omitted]
+FAILED examples/test_mocked_client.py::test_requests_client_survives_every_contract_valid_response[roles_empty]
+FAILED examples/test_mocked_client.py::test_requests_client_survives_every_contract_valid_response[profileimage_omitted]
+FAILED examples/test_mocked_client.py::test_requests_client_survives_every_contract_valid_response[profileimage_null]
+FAILED examples/test_mocked_client.py::test_httpx_client_survives_every_contract_valid_response[age_omitted]
+FAILED examples/test_mocked_client.py::test_httpx_client_survives_every_contract_valid_response[roles_empty]
+FAILED examples/test_mocked_client.py::test_httpx_client_survives_every_contract_valid_response[profileimage_omitted]
+FAILED examples/test_mocked_client.py::test_httpx_client_survives_every_contract_valid_response[profileimage_null]
+```
+
+Eight failures, not four: each assumption is found once per client library,
+which is why every entry appears twice. The `FAILED` lines name which client
+hit it. The other 42 cases include the documented 404 variants, which arrive
+as 404s because that is what the spec says, not because the test said so.
+
+`demo.sh` runs all of this end to end.
 
 ## Why?
 
@@ -160,12 +225,15 @@ Requires Python 3.12+.
 ```
 uv add contractfuzz              # inside a project
 uv add 'contractfuzz[pytest]'    # with the pytest plugin
+uv add 'contractfuzz[mock]'      # with the response mocking helpers
 # or, from a clone:
 uv sync
 ```
 
 Plain pip works too: `pip install .` from a clone. Dependencies are just
-`jsonschema` and `pyyaml`; the `pytest` extra adds pytest and nothing else.
+`jsonschema` and `pyyaml`; the `pytest` extra adds pytest and nothing else,
+and the `mock` extra adds `respx` and `responses`. Install whichever of
+those two matches your HTTP client and skip the extra if you prefer.
 
 ## Usage
 
@@ -258,11 +326,71 @@ def test_client_handles_it(payload, contractfuzz_case):
 ```
 
 It carries `endpoint`, `target` (`"GET 200 response"`), `method`, `kind`,
-`path` (`"$.roles"`), `description`, `danger`, and `is_baseline`.
+`path` (`"$.roles"`), `description`, `danger`, `status` (`"200"`, or `None`
+for a request body), `media_type`, and `is_baseline`.
 
 A missing spec, an unknown endpoint, or a selection that matches no schema
 fails as one clean test case with a one-line message, not a collection
 traceback. `--no-contractfuzz-summary` turns off the summary block.
+
+### Response mocking
+
+```
+pip install 'contractfuzz[mock]'
+```
+
+`mock_contract_response` answers one request with a generated variant, so a
+test can exercise the client you actually ship instead of calling a parsing
+function directly. Two backends: `responses` for clients built on
+`requests`, `respx` for clients built on `httpx`.
+
+```python
+from contractfuzz.mocking import mock_contract_response
+from contractfuzz.plugin import contract_variants
+
+URL = "https://api.example.com/users/7"
+
+
+@contract_variants("openapi.yaml", "/users/{id}", method="get", status="200")
+def test_fetch_profile(payload, contractfuzz_case):
+    with mock_contract_response(URL, payload, contractfuzz_case, backend="responses"):
+        fetch_profile(7)
+```
+
+The mocked response is the response the contract declares. Passing the
+`contractfuzz_case` gives the helper the method, the status code the spec
+attached to that response (a 404 variant arrives as a 404, not a 200), and
+the declared media type, `application/vnd.api+json` included.
+
+Arguments after `case`, all keyword-only:
+
+| argument | default | meaning |
+| --- | --- | --- |
+| `backend` | `"auto"` | `"respx"`, `"responses"`, or `"auto"` when exactly one is installed |
+| `method` | the case's method, else `GET` | override the HTTP method |
+| `status` | the contract's status, else `200` | override the status code |
+| `content_type` | the contract's media type | override the response content type |
+| `assert_called` | `True` | fail if the client never made the request |
+
+`assert_called` is on because a test whose client never issued the request
+proves nothing about the payload; turn it off for a client that may answer
+from a cache.
+
+The context manager yields a `MockedResponse` carrying `backend`, `method`,
+`url`, `status`, `content_type`, `body`, and `mock`, the backend's own router
+object, so a test that needs a second route keeps using respx or responses
+directly.
+
+Both backends are optional. contractfuzz imports neither until you ask for
+one, and asking for one that is not installed raises `MockBackendError` with
+the pip command that fixes it:
+
+```
+MockBackendError: the 'respx' mocking backend is not installed: respx mocks httpx clients; install it with `pip install 'contractfuzz[mock]'` or `pip install respx`
+```
+
+With both installed, `backend="auto"` says so rather than guessing which
+HTTP library your client uses.
 
 ### List endpoints
 
@@ -310,14 +438,20 @@ validation.py  the enforcement point: jsonschema Draft 2020-12 validation
 generator.py   orchestration, deduplication, fixture and manifest output
 ranking.py     danger scoring and the CLI summary
 proxy.py       the mutating HTTP proxy built on the same mutation engine
+cases.py       Case: one payload's provenance, shared by the plugin and the
+               mocking helpers, and free of pytest
 plugin.py      the pytest plugin: contract_variants, the case marker, and
                the end-of-run summary of undocumented assumptions
+mocking.py     respx and responses backends: register one generated variant
+               as the response the contract declares
 cli.py         argparse CLI: generate, list, proxy
 ```
 
 `plugin.py` is the only module that imports pytest, and nothing imports
 it: pytest loads it from the entry point. Installing contractfuzz without
-the `pytest` extra leaves the rest of the tool fully usable.
+the `pytest` extra leaves the rest of the tool fully usable. `mocking.py`
+is the seam for HTTP mocking libraries: each backend is one small function
+registering a route, imported on demand, so adding a third is local work.
 
 The pipeline is deliberately one-directional: baseline, then mutations,
 then validation, then output. Nothing reaches disk or the network without
@@ -342,13 +476,16 @@ passing the validator.
   a pinned fixture directory. Payloads are deterministic for a given spec,
   but a spec change silently changes the cases; if you need payloads
   frozen across runs, use `contractfuzz generate` and commit the output.
+- `mock_contract_response` registers one route per call, against the
+  concrete URL you pass: path templates are not filled in for you, and a
+  flow that makes several requests needs the backend router it hands back.
 
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md). Headlines: external and recursive `$ref`
 support, full `oneOf`/`anyOf` branch coverage, pattern-aware string
-synthesis, combined multi-field mutations, and response mocking helpers
-for `respx` and `responses`.
+synthesis, combined multi-field mutations, and a `--contractfuzz-danger`
+option to narrow a whole run to the most dangerous mutations.
 
 ## Contributing
 

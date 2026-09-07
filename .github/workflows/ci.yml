@@ -17,7 +17,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Sync dependencies
-        run: uv sync
+        # --extra mock installs respx and responses, so the mocking tests and
+        # examples/test_mocked_client.py run against the real libraries.
+        run: uv sync --extra mock
       - name: Lint
         run: |
           uv run ruff check .
@@ -26,3 +28,38 @@ jobs:
         run: uv run pytest
       - name: Demo
         run: ./demo.sh
+
+  without-optional-backends:
+    # The mocking backends are optional. Prove it: install contractfuzz with
+    # no extras at all and check it still imports, still runs, and explains
+    # what to install instead of raising ImportError.
+    name: no optional backends
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install with no extras
+        run: |
+          python -m venv /tmp/bare
+          /tmp/bare/bin/pip install --quiet .
+      - name: Import and fail cleanly with no backend installed
+        run: |
+          /tmp/bare/bin/python - <<'PY'
+          import sys
+
+          import contractfuzz.mocking as mocking
+          from contractfuzz.errors import MockBackendError
+
+          assert "respx" not in sys.modules, "respx must not be imported eagerly"
+          assert "responses" not in sys.modules, "responses must not be imported eagerly"
+          try:
+              mocking.resolve_backend("auto")
+          except MockBackendError as exc:
+              print("clean error:", exc)
+          else:
+              raise SystemExit("expected MockBackendError with no backend installed")
+          PY
+      - name: The CLI still works
+        run: /tmp/bare/bin/contractfuzz list examples/openapi.yaml

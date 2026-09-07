@@ -23,6 +23,10 @@ classifiers = [
 [project.optional-dependencies]
 # The pytest plugin is the only part that needs pytest at runtime.
 pytest = ["pytest>=8.0"]
+# The response mocking helpers. Install the one that matches your HTTP
+# client: respx mocks httpx, responses mocks requests. Neither is needed by
+# anything else in contractfuzz.
+mock = ["respx>=0.21", "responses>=0.25"]
 
 [project.urls]
 Repository = "https://github.com/andreruizloera/contractfuzz"
@@ -42,6 +46,12 @@ dev = [
     "pytest>=8.0",
     "hypothesis>=6.100",
     "ruff>=0.6",
+    # Both mocking backends plus the HTTP clients they mock, so the test
+    # suite and examples/test_mocked_client.py exercise the real libraries.
+    "respx>=0.21",
+    "responses>=0.25",
+    "httpx>=0.27",
+    "requests>=2.31",
 ]
 
 [tool.ruff]

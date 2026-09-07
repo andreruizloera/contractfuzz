@@ -15,3 +15,7 @@ class SpecError(ContractfuzzError):
 
 class UnsupportedSchemaError(ContractfuzzError):
     """A schema is valid but contractfuzz cannot generate data for it yet."""
+
+
+class MockBackendError(ContractfuzzError):
+    """A response mocking backend is missing, unknown, or cannot serve this case."""

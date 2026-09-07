@@ -37,6 +37,7 @@ from typing import Any, TypeVar
 
 import pytest
 
+from contractfuzz.cases import Case
 from contractfuzz.errors import ContractfuzzError, SpecError
 from contractfuzz.generator import TargetResult, generate_for_target, slugify
 from contractfuzz.spec import find_targets, load_spec
@@ -48,27 +49,10 @@ KIND_CHOICES = ("response", "request", "any")
 
 F = TypeVar("F", bound=Callable[..., Any])
 
-
-@dataclass(frozen=True)
-class Case:
-    """What a generated test case is: one payload's provenance.
-
-    Exposed to tests through the ``contractfuzz_case`` fixture, so a test
-    can branch on the mutation it was handed (skip a known-accepted
-    variant, assert a specific fallback, and so on).
-    """
-
-    endpoint: str  # "/users/{id}"
-    target: str  # "GET 200 response"
-    method: str  # "GET"
-    kind: str  # mutation kind, or "baseline"
-    path: str  # JSONPath-style location, "$" for the baseline
-    description: str  # "roles = []"
-    danger: int  # 3 = very likely to break a naive client, 0 for the baseline
-
-    @property
-    def is_baseline(self) -> bool:
-        return self.kind == "baseline"
+# `Case` is defined in contractfuzz.cases, which does not import pytest, so
+# the mocking helpers can use it too. Re-exported here because this is where
+# a plugin user expects to find it.
+__all__ = ["Case", "contract_variants", "contractfuzz_case"]
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +149,8 @@ def _build_params(
                 path="$",
                 description="baseline (fully populated, no mutation)",
                 danger=0,
+                status=target.status,
+                media_type=target.media_type,
             )
             target_rows.append(("baseline", result.baseline, case))
         for variant in result.variants:
@@ -179,6 +165,8 @@ def _build_params(
                 path=record["path"],
                 description=record["description"],
                 danger=record["danger"],
+                status=target.status,
+                media_type=target.media_type,
             )
             target_rows.append((_case_id(record), variant.data, case))
         if prefix:
