@@ -287,12 +287,28 @@ def _describe_failure(excinfo: pytest.ExceptionInfo[BaseException]) -> tuple[str
     return error, location
 
 
+DANGER_OPTION = "--contractfuzz-danger"
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.getgroup("contractfuzz").addoption(
+    group = parser.getgroup("contractfuzz")
+    group.addoption(
         "--no-contractfuzz-summary",
         action="store_true",
         default=False,
         help="suppress the contractfuzz summary of undocumented assumptions",
+    )
+    group.addoption(
+        DANGER_OPTION,
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "run only generated cases with a danger score of N or more"
+            " (1 keeps everything, 3 keeps the mutations most likely to break a"
+            " naive client). The baseline case always runs. Lower-scored cases"
+            " are deselected, not skipped."
+        ),
     )
 
 
@@ -305,7 +321,34 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         f"{ERROR_MARKER}(message): contract_variants could not generate payloads",
     )
+    threshold = config.getoption(DANGER_OPTION)
+    if threshold is not None and threshold < 0:
+        raise pytest.UsageError(f"{DANGER_OPTION} must be 0 or more, got {threshold}")
     config.stash[REPORT_KEY] = Report()
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Narrow the whole run to the most dangerous mutations, no decorator edits.
+
+    The baseline case is kept whatever the threshold. It is the control: if
+    the happy-path payload fails, the edge-case failures mean nothing, and
+    that is worth one test case at any danger setting.
+    """
+    threshold = config.getoption(DANGER_OPTION)
+    if threshold is None:
+        return
+    kept: list[pytest.Item] = []
+    deselected: list[pytest.Item] = []
+    for item in items:
+        marker = item.get_closest_marker(CASE_MARKER)
+        case: Case | None = marker.args[0] if marker else None
+        if case is None or case.is_baseline or case.danger >= threshold:
+            kept.append(item)
+        else:
+            deselected.append(item)
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = kept
 
 
 @pytest.hookimpl(tryfirst=True)

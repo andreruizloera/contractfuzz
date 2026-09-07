@@ -333,6 +333,27 @@ A missing spec, an unknown endpoint, or a selection that matches no schema
 fails as one clean test case with a one-line message, not a collection
 traceback. `--no-contractfuzz-summary` turns off the summary block.
 
+`--contractfuzz-danger=N` narrows a whole run to the mutations scoring N or
+more, across every decorated test, without editing a decorator. Lower-scored
+cases are deselected rather than skipped, so the count says what happened:
+
+```
+$ pytest examples/test_fragile_client.py --contractfuzz-danger=3 --tb=no --no-contractfuzz-summary
+.FFFF...                                                                 [100%]
+=========================== short test summary info ============================
+FAILED examples/test_fragile_client.py::test_render_profile_handles_every_contract_valid_response[age_omitted]
+FAILED examples/test_fragile_client.py::test_render_profile_handles_every_contract_valid_response[roles_empty]
+FAILED examples/test_fragile_client.py::test_render_profile_handles_every_contract_valid_response[profileimage_omitted]
+FAILED examples/test_fragile_client.py::test_render_profile_handles_every_contract_valid_response[profileimage_null]
+4 failed, 4 passed, 15 deselected in 0.20s
+```
+
+Twenty-three cases down to eight, and all four real findings survive. It
+raises the floor and never lowers it: a decorator that asked for
+`min_danger=3` does not get cases back at `--contractfuzz-danger=1`. The
+baseline case runs at any threshold, because without the control the other
+failures cannot be read.
+
 ### Response mocking
 
 ```
@@ -484,8 +505,8 @@ passing the validator.
 
 See [ROADMAP.md](ROADMAP.md). Headlines: external and recursive `$ref`
 support, full `oneOf`/`anyOf` branch coverage, pattern-aware string
-synthesis, combined multi-field mutations, and a `--contractfuzz-danger`
-option to narrow a whole run to the most dangerous mutations.
+synthesis, combined multi-field mutations, and a pinned fixture directory
+for suites that want byte-identical payloads across runs.
 
 ## Contributing
 

@@ -285,6 +285,106 @@ def test_invalid_kind_and_min_danger_raise_immediately() -> None:
 
 
 # ---------------------------------------------------------------------------
+# --contractfuzz-danger: narrow a whole run without editing decorators
+# ---------------------------------------------------------------------------
+
+
+def danger_suite(pytester: pytest.Pytester) -> None:
+    """A suite with one decorated test and one ordinary test."""
+    pytester.makepyfile(
+        f"""
+        from contractfuzz.plugin import contract_variants
+
+        @contract_variants({SPEC!r}, "/users/{{id}}", method="get", status="200")
+        def test_generated(payload):
+            pass
+
+        def test_ordinary():
+            assert True
+        """
+    )
+
+
+def test_danger_option_keeps_only_the_dangerous_cases(pytester: pytest.Pytester) -> None:
+    danger_suite(pytester)
+    # 23 generated cases: the baseline, 7 at danger 3, and 15 below it. The
+    # ordinary test is untouched, which is why this is 9 and not 8.
+    result = run(pytester, "--contractfuzz-danger=3", "-v")
+    result.assert_outcomes(passed=9, deselected=15)
+    ids = ids_from(result)
+    assert {"baseline", "roles_empty", "age_omitted", "profileimage_null"} <= ids
+    assert not {"email_empty", "age_150_maximum", "status_inactive_enum_alternative"} & ids
+
+
+def test_without_the_option_nothing_is_deselected(pytester: pytest.Pytester) -> None:
+    danger_suite(pytester)
+    run(pytester).assert_outcomes(passed=24, deselected=0, failed=0)
+
+
+def test_the_baseline_survives_any_threshold(pytester: pytest.Pytester) -> None:
+    """The control case runs whatever the danger setting: it is what makes
+    the other failures readable."""
+    pytester.makepyfile(
+        f"""
+        from contractfuzz.plugin import contract_variants
+
+        @contract_variants({SPEC!r}, "/users/{{id}}", method="get", status="200")
+        def test_generated(payload, contractfuzz_case):
+            assert contractfuzz_case.is_baseline
+        """
+    )
+    result = run(pytester, "--contractfuzz-danger=99", "-v")
+    result.assert_outcomes(passed=1, deselected=22)
+    assert "baseline" in ids_from(result)
+
+
+def test_the_option_raises_the_floor_but_cannot_lower_it(pytester: pytest.Pytester) -> None:
+    """A decorator that already asked for danger 3 does not get cases back."""
+    pytester.makepyfile(
+        f"""
+        from contractfuzz.plugin import contract_variants
+
+        @contract_variants(
+            {SPEC!r}, "/users/{{id}}", method="get", status="200",
+            min_danger=3, include_baseline=False,
+        )
+        def test_generated(payload):
+            pass
+        """
+    )
+    run(pytester, "--contractfuzz-danger=1").assert_outcomes(passed=7, deselected=0)
+
+
+def test_the_summary_counts_only_what_ran(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(
+        f"""
+        from contractfuzz.plugin import contract_variants
+
+        @contract_variants({SPEC!r}, "/users/{{id}}", method="get", status="200")
+        def test_generated(payload):
+            payload["roles"][0]
+        """
+    )
+    result = run(pytester, "--contractfuzz-danger=3")
+    result.stdout.fnmatch_lines(["*8 contract-valid payloads exercised, 1 broke the client.*"])
+
+
+def test_a_negative_threshold_is_a_clean_usage_error(pytester: pytest.Pytester) -> None:
+    danger_suite(pytester)
+    result = run(pytester, "--contractfuzz-danger=-1")
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines(["*--contractfuzz-danger must be 0 or more, got -1*"])
+    assert "Traceback" not in result.stderr.str()
+
+
+def test_a_non_numeric_threshold_is_a_clean_usage_error(pytester: pytest.Pytester) -> None:
+    danger_suite(pytester)
+    result = run(pytester, "--contractfuzz-danger=high")
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines(["*invalid int value: 'high'*"])
+
+
+# ---------------------------------------------------------------------------
 # Clean failures instead of collection tracebacks
 # ---------------------------------------------------------------------------
 
