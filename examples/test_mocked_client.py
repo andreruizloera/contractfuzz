@@ -25,14 +25,16 @@ from contractfuzz.mocking import mock_contract_response
 from contractfuzz.plugin import contract_variants
 
 BASE_URL = "https://api.example.com"
-URL = f"{BASE_URL}/users/7"
 
 
+# The URL is the spec's own path template, "/users/{id}", so these tests never
+# name the id the clients build. The mock answers any value in its place.
 @contract_variants("openapi.yaml", "/users/{id}", method="get", status="200")
 def test_requests_client_survives_every_contract_valid_response(
     payload: dict[str, Any], contractfuzz_case: Case
 ) -> None:
-    with mock_contract_response(URL, payload, contractfuzz_case, backend="responses"):
+    url = BASE_URL + contractfuzz_case.endpoint
+    with mock_contract_response(url, payload, contractfuzz_case, backend="responses"):
         fetch_profile_with_requests(BASE_URL, 7)
 
 
@@ -40,7 +42,8 @@ def test_requests_client_survives_every_contract_valid_response(
 def test_httpx_client_survives_every_contract_valid_response(
     payload: dict[str, Any], contractfuzz_case: Case
 ) -> None:
-    with mock_contract_response(URL, payload, contractfuzz_case, backend="respx"):
+    url = BASE_URL + contractfuzz_case.endpoint
+    with mock_contract_response(url, payload, contractfuzz_case, backend="respx"):
         fetch_profile_with_httpx(BASE_URL, 7)
 
 
@@ -51,13 +54,14 @@ def test_httpx_client_survives_every_contract_valid_response(
 def test_both_clients_raise_on_the_documented_404(
     payload: dict[str, Any], contractfuzz_case: Case
 ) -> None:
+    url = BASE_URL + contractfuzz_case.endpoint
     with (
-        mock_contract_response(URL, payload, contractfuzz_case, backend="responses"),
+        mock_contract_response(url, payload, contractfuzz_case, backend="responses"),
         pytest.raises(requests.HTTPError),
     ):
         fetch_profile_with_requests(BASE_URL, 7)
     with (
-        mock_contract_response(URL, payload, contractfuzz_case, backend="respx"),
+        mock_contract_response(url, payload, contractfuzz_case, backend="respx"),
         pytest.raises(httpx.HTTPStatusError),
     ):
         fetch_profile_with_httpx(BASE_URL, 7)

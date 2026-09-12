@@ -45,8 +45,17 @@ echo "== 4. The same variants served to real HTTP clients, with no server =="
 # The mocking backends are optional dependencies, so this step is skipped
 # rather than failed when they are missing.
 if "${PY[@]}" -c "import respx, responses, httpx, requests" 2>/dev/null; then
-    if "${PYTEST[@]}" examples/test_mocked_client.py -q --tb=no; then
+    if mocked="$("${PYTEST[@]}" examples/test_mocked_client.py -q --tb=no)"; then
+        printf '%s\n' "$mocked"
         echo "demo unexpectedly found no failing cases" >&2
+        exit 1
+    fi
+    printf '%s\n' "$mocked"
+    # A failing run is not enough: a URL the mock never matched fails every
+    # case too. The count is what says the payloads reached the clients.
+    expected="50 contract-valid payloads exercised, 8 broke the client."
+    if ! grep -qF "$expected" <<<"$mocked"; then
+        echo "demo expected: $expected" >&2
         exit 1
     fi
 else

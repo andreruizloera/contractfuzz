@@ -28,16 +28,19 @@ Honest future work. None of this is implemented yet.
 ## Integrations
 
 The pytest plugin (`contract_variants`), the `--contractfuzz-danger`
-option, and the response mocking helpers for `respx` and `responses`
-(`mock_contract_response`) all SHIPPED; see the README. What is still
-future work around them:
+option, the response mocking helpers for `respx` and `responses`
+(`mock_contract_response`), and path templates in those helpers
+(`https://api.example.com/users/{id}` registered once) all SHIPPED; see the
+README. What is still future work around them:
 
 - Reuse a pinned fixture directory instead of generating in-process, for
   suites that want byte-identical payloads across runs.
 - Mocking helpers for the other common backends: `aioresponses`,
   `pytest-httpserver`, and `requests-mock`.
-- URL templating in the mocking helpers, so `/users/{id}` can be registered
-  once instead of naming the concrete URL per test.
+- Recording the concrete URLs a path template answered, so a test can
+  assert which id its client built; today a template accepts any value.
+- A path template with no scheme and host (`contractfuzz_case.endpoint`
+  alone) matching that path on any host. Today it is refused.
 - JS/TS fixture output with type stubs for frontend test suites.
 
 ## Proxy

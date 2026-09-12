@@ -17,10 +17,11 @@ from typing import Any
 import httpx
 import pytest
 import requests
+from respx.models import AllMockedAssertionError
 
 from contractfuzz.cases import Case
 from contractfuzz.errors import ContractfuzzError, MockBackendError
-from contractfuzz.mocking import mock_contract_response, resolve_backend
+from contractfuzz.mocking import mock_contract_response, resolve_backend, url_pattern
 
 EXAMPLE_SPEC = Path(__file__).resolve().parent.parent / "examples" / "openapi.yaml"
 SPEC = str(EXAMPLE_SPEC)
@@ -333,3 +334,128 @@ def test_the_404_variants_reach_the_client_as_404s(pytester: pytest.Pytester) ->
         """
     )
     pytester.runpytest().assert_outcomes(passed=4)
+
+
+# ---------------------------------------------------------------------------
+# Path templates: one registration answers every id the client builds
+# ---------------------------------------------------------------------------
+
+TEMPLATE = "https://api.example.com/users/{id}"
+
+
+def fetch(backend: str, url: str) -> requests.Response | httpx.Response:
+    """GET ``url`` with the client library that ``backend`` mocks."""
+    return requests.get(url, timeout=5) if backend == "responses" else httpx.get(url)
+
+
+def test_a_concrete_url_is_registered_as_it_is() -> None:
+    """The control: no placeholder, no pattern, the same route as before."""
+    assert url_pattern(URL) is None
+    with mock_contract_response(URL, PAYLOAD, make_case(), backend="respx") as mocked:
+        httpx.get(URL)
+    assert mocked.url_pattern is None
+
+
+def test_a_template_matches_any_value_in_its_placeholder() -> None:
+    pattern = url_pattern(TEMPLATE)
+    assert pattern is not None
+    for requested in (
+        "https://api.example.com/users/7",
+        "https://api.example.com/users/ada%20lovelace",
+        "https://api.example.com/users/7?expand=roles",  # a concrete URL accepts a query too
+        "HTTPS://API.EXAMPLE.COM/users/7",  # scheme and host are case-insensitive
+    ):
+        assert pattern.match(requested), requested
+
+
+def test_a_template_does_not_match_a_different_route() -> None:
+    """Anchored at both ends, since respx applies it with search() and responses with match()."""
+    pattern = url_pattern(TEMPLATE)
+    assert pattern is not None
+    for requested in (
+        "https://api.example.com/users/",  # an empty value is not a value
+        "https://api.example.com/users",
+        "https://api.example.com/users/7/posts",  # a value is at most one segment
+        "https://api.example.com/v2/users/7",  # what an unanchored search() would accept
+        "https://apixexample.com/users/7",  # the dot in the host is literal
+        "https://api.example.com.evil.test/users/7",
+        "http://api.example.com/users/7",
+    ):
+        assert not pattern.search(requested), requested
+
+
+def test_several_placeholders_and_one_inside_a_segment() -> None:
+    pattern = url_pattern("https://api.example.com/orgs/{org}/files/{name}.json")
+    assert pattern is not None
+    assert pattern.match("https://api.example.com/orgs/acme/files/report.v2.json")
+    assert not pattern.match("https://api.example.com/orgs/acme/files/report.yaml")
+    assert not pattern.match("https://api.example.com/orgs/acme/team/files/report.json")
+
+
+@pytest.mark.parametrize("backend", ["responses", "respx"])
+def test_one_templated_registration_answers_every_id(backend: str) -> None:
+    """The feature: the test does not have to know which id the client builds."""
+    with mock_contract_response(TEMPLATE, PAYLOAD, make_case(), backend=backend) as mocked:
+        first = fetch(backend, "https://api.example.com/users/7")
+        second = fetch(backend, "https://api.example.com/users/8?expand=roles")
+    assert (first.status_code, second.status_code) == (200, 200)
+    assert first.json() == second.json() == PAYLOAD
+    assert mocked.url == TEMPLATE
+    assert mocked.url_pattern is not None
+
+
+@pytest.mark.parametrize("backend", ["responses", "respx"])
+def test_a_template_widens_the_value_not_the_route(backend: str) -> None:
+    """A longer path gets the backend's own not-mocked error, as a wrong concrete URL does."""
+    refused = requests.ConnectionError if backend == "responses" else AllMockedAssertionError
+    with (
+        pytest.raises(refused),
+        mock_contract_response(TEMPLATE, PAYLOAD, make_case(), backend=backend),
+    ):
+        fetch(backend, "https://api.example.com/users/7/posts")
+
+
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        ("/users/{id}", "no scheme and host"),
+        ("https://{tenant}.example.com/users/{id}", "placeholder in the host"),
+        ("https://api.example.com/users/{id}?expand=roles", "query string or fragment"),
+    ],
+)
+def test_a_template_that_would_need_a_guess_is_refused(url: str, reason: str) -> None:
+    with (
+        pytest.raises(MockBackendError, match=reason),
+        mock_contract_response(url, PAYLOAD, make_case(), backend="respx"),
+    ):
+        pass
+
+
+def test_the_specs_own_path_template_is_a_valid_url(pytester: pytest.Pytester) -> None:
+    """BASE_URL + contractfuzz_case.endpoint, and the client asks for an id no test names."""
+    pytester.makepyfile(
+        f"""
+        import httpx
+
+        from contractfuzz.mocking import mock_contract_response
+        from contractfuzz.plugin import contract_variants
+
+        BASE_URL = "https://api.example.com"
+
+        @contract_variants({SPEC!r}, "/users/{{id}}", method="get", status="200")
+        def test_client(payload, contractfuzz_case):
+            url = BASE_URL + contractfuzz_case.endpoint
+            with mock_contract_response(url, payload, contractfuzz_case, backend="respx"):
+                user = httpx.get(BASE_URL + "/users/42").json()
+                user["roles"][0]              # assumes roles is never empty
+                user["profileImage"].lower()  # assumes nullable field is a string
+        """
+    )
+    result = pytester.runpytest("-v")
+    failed = {
+        line.split("[", 1)[1].split("]", 1)[0]
+        for line in result.outlines
+        if "FAILED" in line and "[" in line
+    }
+    assert failed == {"roles_empty", "profileimage_null", "profileimage_omitted"}
+    result.stdout.fnmatch_lines(["*23 contract-valid payloads exercised, 3 broke the client.*"])

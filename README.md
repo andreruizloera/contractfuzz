@@ -146,12 +146,14 @@ included, with no server running:
 ```python
 @contract_variants("openapi.yaml", "/users/{id}", method="get", status="200")
 def test_requests_client(payload: dict[str, Any], contractfuzz_case: Case) -> None:
-    with mock_contract_response(URL, payload, contractfuzz_case, backend="responses"):
+    url = BASE_URL + contractfuzz_case.endpoint  # "https://api.example.com/users/{id}"
+    with mock_contract_response(url, payload, contractfuzz_case, backend="responses"):
         fetch_profile_with_requests(BASE_URL, 7)
 ```
 
-`examples/test_mocked_client.py` does that for both an httpx client and a
-requests client, and both break in the same four places:
+The URL is the spec's own path template, so the test never names the id the
+client builds. `examples/test_mocked_client.py` does that for both an httpx
+client and a requests client, and both break in the same four places:
 
 ```
 $ pytest examples/test_mocked_client.py --tb=no -q
@@ -383,6 +385,15 @@ The mocked response is the response the contract declares. Passing the
 attached to that response (a 404 variant arrives as a 404, not a 200), and
 the declared media type, `application/vnd.api+json` included.
 
+The URL can be concrete, or keep its path parameters as the spec writes them:
+`https://api.example.com/users/{id}` answers `/users/7` and `/users/8` alike,
+so `BASE_URL + contractfuzz_case.endpoint` works as the URL. Each placeholder
+stands for one path segment or part of one, so the template does not answer
+`/users/7/posts` or `/v2/users/7`. Scheme and host compare case-insensitively,
+and a query string the client adds is accepted, as it is for a concrete URL.
+A template with no scheme and host, a placeholder in the host, or a query
+string of its own raises `MockBackendError` rather than guessing what to match.
+
 Arguments after `case`, all keyword-only:
 
 | argument | default | meaning |
@@ -398,7 +409,8 @@ proves nothing about the payload; turn it off for a client that may answer
 from a cache.
 
 The context manager yields a `MockedResponse` carrying `backend`, `method`,
-`url`, `status`, `content_type`, `body`, and `mock`, the backend's own router
+`url`, `status`, `content_type`, `body`, `url_pattern` (the compiled pattern
+when `url` is a template, else `None`), and `mock`, the backend's own router
 object, so a test that needs a second route keeps using respx or responses
 directly.
 
@@ -497,9 +509,12 @@ passing the validator.
   a pinned fixture directory. Payloads are deterministic for a given spec,
   but a spec change silently changes the cases; if you need payloads
   frozen across runs, use `contractfuzz generate` and commit the output.
-- `mock_contract_response` registers one route per call, against the
-  concrete URL you pass: path templates are not filled in for you, and a
-  flow that makes several requests needs the backend router it hands back.
+- `mock_contract_response` registers one route per call. A path template
+  answers any id on that route, but a flow that requests several different
+  routes still needs the backend router it hands back.
+- A path template accepts any value in each placeholder, so it does not
+  check which id the client asked for. Pass the concrete URL when the id is
+  what the test is about.
 
 ## Roadmap
 
